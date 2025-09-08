@@ -543,3 +543,275 @@ class TwitterBot:
                     raise e
                 time.sleep(1)
         return None
+
+    def reply_to_tweet(self, tweet_element):
+        """Reply to a specific tweet with an AI-generated response"""
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView(true);", tweet_element)
+            time.sleep(2)
+
+            tweet_link = self.get_tweet_id(tweet_element)
+            if not tweet_link:
+                return False
+
+            try:
+                text_element = tweet_element.find_element(By.CSS_SELECTOR, '[data-testid="tweetText"]')
+                tweet_text = text_element.text if text_element else None
+            except Exception:
+                tweet_text = None
+
+            if not tweet_text:
+                return False
+            else:
+                if not self.should_promote_on_tweet(tweet_text):
+                    return False
+                    
+                reply_text = self.generate_salesly_promotion(tweet_text)
+            
+            reply_text = self.clean_text(reply_text)
+            
+            try:
+                reply_button = tweet_element.find_element(By.CSS_SELECTOR, '[data-testid="reply"]')
+                if not reply_button.is_displayed():
+                    return False
+            except Exception:
+                return False
+
+            try:
+                reply_button.click()
+            except:
+                try:
+                    self.driver.execute_script("arguments[0].click();", reply_button)
+                except Exception:
+                    return False
+            time.sleep(2)
+
+            try:
+                reply_box = self.wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="tweetTextarea_0"]'))
+                )
+                if not reply_box.is_displayed():
+                    return False
+            except Exception:
+                return False
+
+            try:
+                reply_box.clear()
+                reply_box.send_keys(reply_text)
+            except Exception:
+                try:
+                    reply_box.clear()
+                    for char in reply_text:
+                        reply_box.send_keys(char)
+                        time.sleep(0.05)
+                except Exception:
+                    return False
+
+            try:
+                submit_button = self.wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="tweetButton"]'))
+                )
+                submit_button.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", submit_button)
+                except:
+                    return False
+
+            time.sleep(3)
+            return True
+
+        except Exception:
+            return False
+
+    def scroll_to_top(self):
+        """Scroll to the top of the feed"""
+        try:
+            self.driver.execute_script("window.scrollTo(0, 0)")
+            time.sleep(2)
+        except Exception:
+            pass
+
+    def scroll_feed(self, scroll_count=3):
+        """Scroll the feed to load more tweets"""
+        try:
+            for _ in range(scroll_count):
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1)
+        except Exception:
+            pass
+
+    def get_recent_tweets(self, max_tweets=20):
+        """Get the most recent tweets from the feed"""
+        try:
+            self.scroll_to_top()
+            time.sleep(2)
+            
+            self.scroll_feed(scroll_count=3)
+            
+            tweets = self.wait.until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'article[data-testid="tweet"]'))
+            )
+            
+            if not tweets:
+                return []
+
+            fresh_tweets = []
+            processed_count = 0
+            
+            for tweet in tweets:
+                try:
+                    if not tweet.is_displayed() or not self.get_tweet_id(tweet):
+                        continue
+                        
+                    if self.is_own_tweet(tweet):
+                        continue
+                        
+                    if self.is_reply_tweet(tweet):
+                        continue
+                        
+                    fresh_tweets.append(tweet)
+                    processed_count += 1
+                    
+                    if processed_count >= max_tweets:
+                        break
+                        
+                except Exception:
+                    continue
+            
+            return fresh_tweets
+        except Exception as e:
+            print(f"Error getting tweets: {str(e)}")
+            return []
+
+    def monitor_feed(self, interval=10):
+        """Monitor the home feed and promote Salesly on relevant tweets"""
+        if not self.login():
+            print("Failed to login. Please check your credentials.")
+            return
+
+        processed_tweets = set()
+        print("Starting Salesly promotion bot...")
+        print("Looking for relevant tweets to promote Salesly...")
+        
+        while True:
+            try:
+                print(f"\nRefreshing feed... (processed {len(processed_tweets)} tweets so far)")
+                self.driver.refresh()
+                time.sleep(5)
+                
+                tweets = self.get_recent_tweets(max_tweets=20)
+                print(f"Found {len(tweets)} tweets to analyze")
+                
+                tweets_processed_this_round = 0
+                
+                for tweet in tweets:
+                    try:
+                        tweet_id = self.get_tweet_id(tweet)
+                        if not tweet_id:
+                            continue
+                            
+                        if tweet_id in processed_tweets:
+                            continue
+                        
+                        metrics = self.get_salesly_metrics()
+                        metrics['tweets_analyzed'] += 1
+                        
+                        tweet_text = self.get_tweet_text(tweet)
+                        if not tweet_text or not self.should_promote_on_tweet(tweet_text):
+                            continue
+                        
+                        metrics['relevant_tweets_found'] += 1
+                        print(f"Found relevant tweet: {tweet_text[:60]}...")
+                        
+                        if self.reply_to_tweet(tweet):
+                            processed_tweets.add(tweet_id)
+                            tweets_processed_this_round += 1
+                            metrics['promotions_sent'] += 1
+                            print(f"Successfully promoted Salesly!")
+                            time.sleep(random.uniform(
+                                SALESLY_CONFIG['min_delay_between_promotions'], 
+                                SALESLY_CONFIG['max_delay_between_promotions']
+                            ))
+                        else:
+                            print("Failed to reply to tweet")
+                    except Exception as e:
+                        print(f"Error processing tweet: {str(e)}")
+                        continue
+                
+                print(f"Processed {tweets_processed_this_round} new tweets this round")
+                
+                if hasattr(self, '_rounds_count'):
+                    self._rounds_count += 1
+                else:
+                    self._rounds_count = 1
+                
+                if self._rounds_count % 5 == 0:
+                    self.log_salesly_metrics()
+                
+                if len(processed_tweets) > 100:
+                    print("Cleaning up processed tweets list...")
+                    processed_list = list(processed_tweets)
+                    processed_tweets = set(processed_list[-100:])
+                
+                print(f"Waiting {interval} seconds before next refresh...")
+                time.sleep(interval)
+                
+            except Exception as e:
+                print(f"Error in feed monitoring: {str(e)}")
+                try:
+                    self.driver.refresh()
+                except:
+                    pass
+                time.sleep(interval)
+
+    def get_salesly_metrics(self):
+        """Track promotion metrics"""
+        if not hasattr(self, '_salesly_metrics'):
+            self._salesly_metrics = {
+                'tweets_analyzed': 0,
+                'promotions_sent': 0,
+                'relevant_tweets_found': 0,
+                'start_time': datetime.now()
+            }
+        return self._salesly_metrics
+    
+    def log_salesly_metrics(self):
+        """Log current promotion metrics"""
+        metrics = self.get_salesly_metrics()
+        runtime = datetime.now() - metrics['start_time']
+        
+        print(f"\n=== Salesly Promotion Metrics ===")
+        print(f"Runtime: {runtime}")
+        print(f"Tweets analyzed: {metrics['tweets_analyzed']}")
+        print(f"Relevant tweets found: {metrics['relevant_tweets_found']}")
+        print(f"Salesly promotions sent: {metrics['promotions_sent']}")
+        if metrics['relevant_tweets_found'] > 0:
+            success_rate = (metrics['promotions_sent'] / metrics['relevant_tweets_found']) * 100
+            print(f"Success rate: {success_rate:.1f}%")
+        print("=" * 35)
+
+    def cleanup(self):
+        """Close the browser and clean up"""
+        if hasattr(self, 'driver'):
+            self.driver.quit()
+
+def main():
+    print("=== Salesly Twitter Promotion Bot ===")
+    print("This bot will automatically promote Salesly on relevant Twitter threads")
+    print("Looking for tweets about websites, business growth, customer support, etc.")
+    print("Press Ctrl+C to stop the bot")
+    print("=" * 50)
+    
+    bot = TwitterBot()
+    try:
+        bot.monitor_feed(interval=10)
+    except KeyboardInterrupt:
+        print("\nStopping Salesly promotion bot...")
+    finally:
+        print("Cleaning up...")
+        bot.cleanup()
+        print("Bot stopped successfully!")
+
+if __name__ == "__main__":
+    main()
