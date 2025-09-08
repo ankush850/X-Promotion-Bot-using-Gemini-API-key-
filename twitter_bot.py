@@ -307,3 +307,239 @@ class TwitterBot:
             
         except Exception:
             return self._keyword_based_filtering(tweet_text)
+    
+    def _keyword_based_filtering(self, tweet_text):
+        """Fallback keyword-based filtering when AI is not available"""
+        tweet_lower = tweet_text.lower()
+        
+        tech_keywords = [
+            'website', 'web', 'site', 'app', 'software', 'saas', 'platform',
+            'user experience', 'ux', 'ui', 'conversion', 'analytics',
+            'customer support', 'chatbot', 'engagement', 'visitors',
+            'landing page', 'e-commerce', 'online store', 'digital',
+            'startup', 'tech', 'developer', 'programming', 'code'
+        ]
+        
+        non_tech_keywords = [
+            'agriculture', 'farming', 'crops', 'harvest', 'farm', 'livestock',
+            'recipe', 'cooking', 'food', 'restaurant', 'meal',
+            'sports', 'football', 'basketball', 'soccer', 'game',
+            'politics', 'election', 'government', 'policy',
+            'health', 'medical', 'doctor', 'hospital', 'medicine',
+            'travel', 'vacation', 'trip', 'tourism', 'hotel'
+        ]
+        
+        has_tech_keywords = any(keyword in tweet_lower for keyword in tech_keywords)
+        has_non_tech_keywords = any(keyword in tweet_lower for keyword in non_tech_keywords)
+        
+        return has_tech_keywords and not has_non_tech_keywords
+    
+    def _validate_ai_decision_with_keywords(self, ai_decision, tweet_text):
+        """Validate AI decision with keyword check for extra safety"""
+        tweet_lower = tweet_text.lower()
+        
+        tech_keywords = [
+            'website', 'web', 'site', 'app', 'software', 'saas', 'platform',
+            'user experience', 'ux', 'ui', 'conversion', 'analytics',
+            'customer support', 'chatbot', 'engagement', 'visitors',
+            'landing page', 'e-commerce', 'online store', 'digital',
+            'startup', 'tech', 'developer', 'programming', 'code'
+        ]
+        
+        non_tech_keywords = [
+            'agriculture', 'farming', 'crops', 'harvest', 'farm', 'livestock',
+            'recipe', 'cooking', 'food', 'restaurant', 'meal',
+            'sports', 'football', 'basketball', 'soccer', 'game',
+            'politics', 'election', 'government', 'policy',
+            'health', 'medical', 'doctor', 'hospital', 'medicine',
+            'travel', 'vacation', 'trip', 'tourism', 'hotel'
+        ]
+        
+        has_tech_keywords = any(keyword in tweet_lower for keyword in tech_keywords)
+        has_non_tech_keywords = any(keyword in tweet_lower for keyword in non_tech_keywords)
+        
+        is_suitable = (ai_decision == "YES" and has_tech_keywords and not has_non_tech_keywords)
+        
+        return is_suitable
+
+    def generate_salesly_promotion(self, tweet_text):
+        """Generate a highly contextual and creative response that naturally promotes Salesly"""
+        
+        if not self.ai_available or not self.model:
+            print("Using fallback response generation")
+            return self._generate_fallback_response(tweet_text)
+        
+        try:
+            creative_prompt = f"""
+            You are a helpful tech professional who genuinely wants to help others. Someone has posted this tweet, and you want to share a solution that could help them.
+            
+            Your tool, Salesly, is a website engagement platform that:
+            - Provides instant answers to website visitors' questions
+            - Gives website owners insights into what visitors are really looking for
+            - Helps reduce bounce rates and improve conversions
+            - Perfect for SaaS, e-commerce, portfolios, and business websites
+            
+            Create a natural, helpful response that:
+            1. First acknowledges their specific situation or challenge
+            2. Naturally transitions to how Salesly could help with their exact problem
+            3. Sounds like genuine advice from a peer, not a sales pitch
+            4. Uses conversational language and feels authentic
+            5. Is EXACTLY 250 characters or less including "salesly.live"
+            6. Doesn't use generic templates - be creative and specific to their tweet
+            7. Use only basic text - NO markdown formatting, NO asterisks, NO special symbols
+            8. Write complete sentences with proper punctuation
+            9. Make sure the message ends properly with the URL
+            
+            FORMATTING RULES:
+            - NO *asterisks* around words
+            - NO markdown formatting 
+            - Use plain text only
+            - Complete all sentences properly
+            - Always end with the URL
+            
+            Examples of good responses:
+            - For website performance: "I had the same issue with my site! What really helped was understanding what visitors were actually looking for. Salesly gives you those insights while helping them instantly. Game changer: salesly.live"
+            - For customer support: "Been there! The key is catching questions before they become support tickets. Salesly does exactly that - answers visitors instantly while showing you what they need: salesly.live"
+            
+            Tweet: "{tweet_text}"
+            
+            Your helpful, contextual response:"""
+            
+            max_retries = 3
+            ai_reply = None
+            
+            for attempt in range(max_retries):
+                try:
+                    response = self.model.generate_content(creative_prompt)
+                    ai_reply = response.text.strip().strip('"')
+                    break
+                except Exception as api_error:
+                    error_str = str(api_error).lower()
+                    if "404" in error_str or "not found" in error_str:
+                        self.ai_available = False
+                        return self._generate_fallback_response(tweet_text)
+                    elif "429" in error_str or "quota" in error_str:
+                        wait_time = (attempt + 1) * 10
+                        time.sleep(wait_time)
+                        if attempt == max_retries - 1:
+                            return self._generate_fallback_response(tweet_text)
+                    elif "503" in error_str or "overloaded" in error_str:
+                        wait_time = (attempt + 1) * 5
+                        time.sleep(wait_time)
+                        if attempt == max_retries - 1:
+                            return self._generate_fallback_response(tweet_text)
+                    else:
+                        if attempt == max_retries - 1:
+                            return self._generate_fallback_response(tweet_text)
+                        time.sleep(2)
+            
+            if not ai_reply:
+                return self._generate_fallback_response(tweet_text)
+            
+            ai_reply = self.clean_text(ai_reply)
+            ai_reply = ai_reply.replace('*', '').replace('_', '').replace('`', '')
+            
+            if SALESLY_CONFIG['website_url'].lower() not in ai_reply.lower():
+                available_space = 270 - len(ai_reply)
+                if available_space > 20:
+                    ai_reply += f" Check out {SALESLY_CONFIG['website_url']}"
+                else:
+                    sentences = ai_reply.split('.')
+                    if len(sentences) > 1:
+                        complete_sentences = []
+                        total_length = 0
+                        for sentence in sentences[:-1]:
+                            sentence = sentence.strip()
+                            if sentence and total_length + len(sentence) + 20 < 250:
+                                complete_sentences.append(sentence)
+                                total_length += len(sentence) + 2
+                        
+                        if complete_sentences:
+                            ai_reply = '. '.join(complete_sentences) + f". {SALESLY_CONFIG['website_url']}"
+                        else:
+                            ai_reply = ai_reply[:220].rsplit(' ', 1)[0] + f" {SALESLY_CONFIG['website_url']}"
+                    else:
+                        ai_reply = ai_reply[:220].rsplit(' ', 1)[0] + f" {SALESLY_CONFIG['website_url']}"
+            
+            if len(ai_reply) > 270:
+                max_content_length = 250
+                if SALESLY_CONFIG['website_url'] in ai_reply:
+                    if len(ai_reply) > 270:
+                        truncated = ai_reply[:270].rsplit(' ', 1)[0]
+                        ai_reply = truncated
+                else:
+                    content_without_url = ai_reply.replace(SALESLY_CONFIG['website_url'], '').strip()
+                    if len(content_without_url) > max_content_length:
+                        sentences = content_without_url.split('.')
+                        complete_content = ""
+                        for sentence in sentences:
+                            sentence = sentence.strip()
+                            if sentence and len(complete_content + sentence + ". ") <= max_content_length:
+                                complete_content += sentence + ". "
+                        
+                        ai_reply = complete_content.strip() + f" {SALESLY_CONFIG['website_url']}"
+            
+            return ai_reply
+            
+        except Exception:
+            return self._generate_fallback_response(tweet_text)
+    
+    def _generate_fallback_response(self, tweet_text):
+        """Generate a smart fallback response based on tweet content"""
+        tweet_lower = tweet_text.lower()
+        
+        if any(word in tweet_lower for word in ['website', 'site', 'web']):
+            fallback = f"Same challenge here! Understanding what website visitors really need makes a huge difference. Try {SALESLY_CONFIG['website_url']} for visitor insights!"
+        elif any(word in tweet_lower for word in ['support', 'help', 'customer']):
+            fallback = f"Been there! Catching visitor questions early is key. {SALESLY_CONFIG['website_url']} helps with instant answers and insights."
+        elif any(word in tweet_lower for word in ['startup', 'business', 'growth']):
+            fallback = f"As a fellow builder, visitor insights are crucial! {SALESLY_CONFIG['website_url']} shows what people really want on your site."
+        elif any(word in tweet_lower for word in ['saas', 'app', 'software']):
+            fallback = f"User experience is everything! {SALESLY_CONFIG['website_url']} helps understand what users need while helping them instantly."
+        else:
+            fallback = f"Great point! You might find {SALESLY_CONFIG['website_url']} useful for understanding what your website visitors are really looking for."
+        
+        return fallback
+
+    def clean_text(self, text):
+        """Clean text to ensure it only contains supported characters and proper formatting"""
+        if not text:
+            return text
+        
+        text = text.replace('*', '').replace('_', '').replace('`', '').replace('#', '')
+        text = text.replace('[', '').replace(']', '').replace('**', '').replace('__', '')
+        
+        import re
+        cleaned = re.sub(r'[^\w\s.,!?:;()\-\'\"@/.]', '', text)
+        cleaned = ' '.join(cleaned.split())
+        
+        if cleaned and not cleaned.endswith(('.', '!', '?')):
+            if not cleaned.lower().endswith(('salesly.live', '.com', '.io', '.net', '.org')):
+                cleaned += '.'
+        
+        return cleaned or "Great point!"
+
+    def find_element_with_retry(self, by, value, max_attempts=3, check_interactable=False):
+        """Find an element with retry logic for stale elements"""
+        for attempt in range(max_attempts):
+            try:
+                if check_interactable:
+                    element = self.wait.until(
+                        EC.element_to_be_clickable((by, value))
+                    )
+                else:
+                    element = self.wait.until(
+                        EC.presence_of_element_located((by, value))
+                    )
+                    if not element.is_displayed():
+                        raise Exception("Element is not visible")
+                
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                time.sleep(1)
+                
+                return element
+            except Exception as e:
+                if attempt == max_attempts - 1:
+                    raise e
+                time.sleep(1)
+        return None
